@@ -467,6 +467,44 @@ class FormulaTransformer {
         return { formula: result, steps };
     }
 
+    toDNF(formula) {
+        const steps = [];
+        const distribute = (f) => {
+            if (f.type === 'and' && (f.left.type === 'or' || f.right.type === 'or')) {
+                if (f.left.type === 'or') {
+                    const result = new Formula('or', null,
+                        distribute(new Formula('and', null, f.left.left, f.right)),
+                        distribute(new Formula('and', null, f.left.right, f.right))
+                    );
+                    steps.push(`Distribuímos AND sobre OR: $$${f.toString()} \\equiv ${result.toString()}$$`);
+                    return result;
+                } else {
+                    const result = new Formula('or', null,
+                        distribute(new Formula('and', null, f.left, f.right.left)),
+                        distribute(new Formula('and', null, f.left, f.right.right))
+                    );
+                    steps.push(`Distribuímos AND sobre OR: $$${f.toString()} \\equiv ${result.toString()}$$`);
+                    return result;
+                }
+            }
+            switch(f.type) {
+                case 'and':
+                case 'or':
+                    return new Formula(f.type, f.content, distribute(f.left), distribute(f.right));
+                case 'neg':
+                    return new Formula('neg', f.content, distribute(f.left));
+                case 'forall':
+                case 'exists':
+                    return new Formula(f.type, f.content, distribute(f.left));
+                default:
+                    return f;
+            }
+        };
+        const result = distribute(formula);
+        steps.push(`Forma Normal Disjuntiva final: $$${result.toString()}$$`);
+        return { formula: result, steps };
+    }    
+
     transform() {
         let current = this.formula;
         let allSteps = [];
@@ -482,7 +520,7 @@ class FormulaTransformer {
         // 2 - Leis de De Morgan / empurrar negações
         const step2 = this.pushNegations(current);
         current = step2.formula;
-        allSteps.push({ title: "Aplicação das Leis de De Morgan", formula: current, steps: step2.steps });
+        allSteps.push({ title: "Forma Negativa Normal", formula: current, steps: step2.steps });
     
         // 3 - Padronização (α-renomeação) ANTES do prenex
         const step3a = this.standardizeVariables(current);
@@ -498,11 +536,15 @@ class FormulaTransformer {
         const step3b = this.skolemize(current);
         current = step3b.formula;
         allSteps.push({ title: "Skolemização", formula: current, steps: step3b.steps });
+
+        // 6a - FND
+        const step4 = this.toDNF(step3.formula);
+        allSteps.push({ title: "Conversão para Forma Normal Disjuntiva (FND) Prenex", formula: step4.formula, steps: step4.steps });
     
-        // 6 - CNF
-        const step4 = this.toCNF(current);
-        current = step4.formula;
-        allSteps.push({ title: "Conversão para Forma Normal Conjuntiva (FNC)", formula: current, steps: step4.steps });
+        // 6b - CNF
+        const step5 = this.toCNF(current);
+        current = step5.formula;
+        allSteps.push({ title: "Conversão para Forma Normal Conjuntiva (FNC)", formula: current, steps: step5.steps });
     
         // 7 - Forma cláusal (matriz)
         const matrix = getMatrix(current);
